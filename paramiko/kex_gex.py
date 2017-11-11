@@ -23,7 +23,7 @@ client side, and a **lot** more on the server side.
 """
 
 import os
-from hashlib import sha1
+from hashlib import sha1, sha256
 
 from paramiko import util
 from paramiko.common import DEBUG
@@ -54,6 +54,7 @@ class KexGex (object):
         self.e = None
         self.f = None
         self.old_style = False
+        self.hash_algo = sha1
 
     def start_kex(self, _test_old_style=False):
         if self.transport.server_mode:
@@ -204,7 +205,7 @@ class KexGex (object):
         hm.add_mpint(self.e)
         hm.add_mpint(self.f)
         hm.add_mpint(K)
-        H = sha1(hm.asbytes()).digest()
+        H = self.hash_algo(hm.asbytes()).digest()
         self.transport._set_K_H(K, H)
         # sign it
         sig = self.transport.get_server_key().sign_ssh_data(H)
@@ -239,6 +240,14 @@ class KexGex (object):
         hm.add_mpint(self.e)
         hm.add_mpint(self.f)
         hm.add_mpint(K)
-        self.transport._set_K_H(K, sha1(hm.asbytes()).digest())
+        self.transport._set_K_H(K, self.hash_algo(hm.asbytes()).digest())
         self.transport._verify_key(host_key, sig)
         self.transport._activate_outbound()
+
+
+class KexGexSHA256(KexGex):
+    name = 'diffie-hellman-group-exchange-sha256'
+    def __init__(self, transport):
+        super(KexGexSHA256,self).__init__(transport)
+        self.hash_algo = sha256
+        print hash(self),self.hash_algo

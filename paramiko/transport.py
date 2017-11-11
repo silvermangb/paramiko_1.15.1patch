@@ -26,7 +26,7 @@ import sys
 import threading
 import time
 import weakref
-from hashlib import md5, sha1
+from hashlib import md5, sha1, sha256
 
 import paramiko
 from paramiko import util
@@ -47,7 +47,7 @@ from paramiko.common import xffffffff, cMSG_CHANNEL_OPEN, cMSG_IGNORE, \
     DEFAULT_WINDOW_SIZE, DEFAULT_MAX_PACKET_SIZE
 from paramiko.compress import ZlibCompressor, ZlibDecompressor
 from paramiko.dsskey import DSSKey
-from paramiko.kex_gex import KexGex
+from paramiko.kex_gex import KexGex, KexGexSHA256
 from paramiko.kex_group1 import KexGroup1
 from paramiko.kex_group14 import KexGroup14
 from paramiko.kex_gss import KexGSSGex, KexGSSGroup1, KexGSSGroup14, NullHostKey
@@ -96,9 +96,14 @@ class Transport (threading.Thread, ClosingContextManager):
 
     _preferred_ciphers = ('aes128-ctr', 'aes256-ctr', 'aes128-cbc', 'blowfish-cbc',
                           'aes256-cbc', '3des-cbc', 'arcfour128', 'arcfour256')
-    _preferred_macs = ('hmac-sha1', 'hmac-md5', 'hmac-sha1-96', 'hmac-md5-96')
+    _preferred_macs = ('hmac-sha2-256','hmac-sha256','hmac-sha1', 'hmac-md5', 'hmac-sha1-96', 'hmac-md5-96')
     _preferred_keys = ('ssh-rsa', 'ssh-dss', 'ecdsa-sha2-nistp256')
-    _preferred_kex =  ( 'diffie-hellman-group14-sha1', 'diffie-hellman-group-exchange-sha1' , 'diffie-hellman-group1-sha1')
+    _preferred_kex =  ( 
+        'diffie-hellman-group-exchange-sha256', 
+        'diffie-hellman-group-exchange-sha1' , 
+        'diffie-hellman-group14-sha1', 
+        'diffie-hellman-group1-sha1',
+        )
     _preferred_compression = ('none',)
 
     _cipher_info = {
@@ -113,6 +118,8 @@ class Transport (threading.Thread, ClosingContextManager):
     }
 
     _mac_info = {
+        'hmac-sha2-256': {'class': sha256,'size':32},
+        'hmac-sha256': {'class': sha256,'size':32},
         'hmac-sha1': {'class': sha1, 'size': 20},
         'hmac-sha1-96': {'class': sha1, 'size': 12},
         'hmac-md5': {'class': md5, 'size': 16},
@@ -126,6 +133,7 @@ class Transport (threading.Thread, ClosingContextManager):
     }
 
     _kex_info = {
+        'diffie-hellman-group-exchange-sha256': KexGexSHA256,
         'diffie-hellman-group1-sha1': KexGroup1,
         'diffie-hellman-group14-sha1': KexGroup14,
         'diffie-hellman-group-exchange-sha1': KexGex,
@@ -258,6 +266,7 @@ class Transport (threading.Thread, ClosingContextManager):
             self._preferred_kex = ('gss-gex-sha1-toWM5Slw5Ew8Mqkay+al2g==',
                                    'gss-group14-sha1-toWM5Slw5Ew8Mqkay+al2g==',
                                    'gss-group1-sha1-toWM5Slw5Ew8Mqkay+al2g==',
+                                   'diffie-hellman-group-exchange-sha256',
                                    'diffie-hellman-group-exchange-sha1',
                                    'diffie-hellman-group14-sha1',
                                    'diffie-hellman-group1-sha1')
@@ -1495,13 +1504,23 @@ class Transport (threading.Thread, ClosingContextManager):
         m.add_bytes(self.H)
         m.add_byte(b(id))
         m.add_bytes(self.session_id)
-        out = sofar = sha1(m.asbytes()).digest()
+        hash_algo = getattr(self.kex_engine, 'hash_algo', None)
+        hash_select_msg = "kex engine %s specified hash_algo %r" % (
+            self.kex_engine.__class__.__name__, hash_algo
+        )
+        if hash_algo is None:
+            hash_algo = sha1
+            hash_select_msg += ", falling back to sha1"
+        if not hasattr(self, '_logged_hash_selection'):
+            self._log(DEBUG, hash_select_msg)
+            setattr(self, '_logged_hash_selection', True)
+        out = sofar = hash_algo(m.asbytes()).digest()
         while len(out) < nbytes:
             m = Message()
             m.add_mpint(self.K)
             m.add_bytes(self.H)
             m.add_bytes(sofar)
-            digest = sha1(m.asbytes()).digest()
+            digest = hash_algo(m.asbytes()).digest()
             out += digest
             sofar += digest
         return out[:nbytes]
