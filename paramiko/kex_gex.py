@@ -250,4 +250,3 @@ class KexGexSHA256(KexGex):
     def __init__(self, transport):
         super(KexGexSHA256,self).__init__(transport)
         self.hash_algo = sha256
-        print hash(self),self.hash_algo
